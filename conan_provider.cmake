@@ -274,10 +274,14 @@ macro(set_conan_compiler_if_appleclang lang command output_variable)
     if(CMAKE_${lang}_COMPILER_ID STREQUAL "AppleClang")
         execute_process(COMMAND xcrun --find ${command}
             OUTPUT_VARIABLE _xcrun_out OUTPUT_STRIP_TRAILING_WHITESPACE)
-        if (_xcrun_out STREQUAL "${CMAKE_${lang}_COMPILER}")
+        cmake_path(GET _xcrun_out PARENT_PATH _xcrun_toolchain_path)
+        cmake_path(GET CMAKE_${lang}_COMPILER PARENT_PATH _compiler_parent_path)
+        if ("${_xcrun_toolchain_path}" STREQUAL "${_compiler_parent_path}")
             set(${output_variable} "")
         endif()
-        unset(_xcrun_out)      
+        unset(_xcrun_out)
+        unset(_xcrun_toolchain_path)
+        unset(_compiler_parent_path)
     endif()
 endmacro()
 
@@ -430,22 +434,23 @@ function(conan_install)
 
     if(NOT "${return_code}" STREQUAL "0")
         message(FATAL_ERROR "Conan install failed='${return_code}'")
-    else()
-        # the files are generated in a folder that depends on the layout used, if
-        # one is specified, but we don't know a priori where this is.
-        # TODO: this can be made more robust if Conan can provide this in the json output
-        string(JSON CONAN_GENERATORS_FOLDER GET ${conan_stdout} graph nodes 0 generators_folder)
-        cmake_path(CONVERT ${CONAN_GENERATORS_FOLDER} TO_CMAKE_PATH_LIST CONAN_GENERATORS_FOLDER)
-        # message("conan stdout: ${conan_stdout}")
-        message(STATUS "CMake-Conan: CONAN_GENERATORS_FOLDER=${CONAN_GENERATORS_FOLDER}")
-        set_property(GLOBAL PROPERTY CONAN_GENERATORS_FOLDER "${CONAN_GENERATORS_FOLDER}")
-        # reconfigure on conanfile changes
-        string(JSON CONANFILE GET ${conan_stdout} graph nodes 0 label)
-        message(STATUS "CMake-Conan: CONANFILE=${CMAKE_SOURCE_DIR}/${CONANFILE}")
-        set_property(DIRECTORY ${CMAKE_SOURCE_DIR} APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/${CONANFILE}")
-        # success
-        set_property(GLOBAL PROPERTY CONAN_INSTALL_SUCCESS TRUE)
     endif()
+
+    # the files are generated in a folder that depends on the layout used, if
+    # one is specified, but we don't know a priori where this is.
+    # TODO: this can be made more robust if Conan can provide this in the json output
+    string(JSON CONAN_GENERATORS_FOLDER GET ${conan_stdout} graph nodes 0 generators_folder)
+    cmake_path(CONVERT ${CONAN_GENERATORS_FOLDER} TO_CMAKE_PATH_LIST CONAN_GENERATORS_FOLDER)
+    # message("conan stdout: ${conan_stdout}")
+    message(STATUS "CMake-Conan: CONAN_GENERATORS_FOLDER=${CONAN_GENERATORS_FOLDER}")
+    set_property(GLOBAL PROPERTY CONAN_GENERATORS_FOLDER "${CONAN_GENERATORS_FOLDER}")
+    # reconfigure on conanfile changes
+    string(JSON CONANFILE GET ${conan_stdout} graph nodes 0 label)
+    message(STATUS "CMake-Conan: CONANFILE=${CMAKE_SOURCE_DIR}/${CONANFILE}")
+    set_property(DIRECTORY ${CMAKE_SOURCE_DIR} APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/${CONANFILE}")
+    # success
+    set_property(GLOBAL PROPERTY CONAN_INSTALL_SUCCESS TRUE)
+
 endfunction()
 
 
@@ -536,11 +541,11 @@ macro(conan_provide_dependency method package_name)
         get_property(_multiconfig_generator GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
         if(NOT _multiconfig_generator)
             message(STATUS "CMake-Conan: Installing single configuration ${CMAKE_BUILD_TYPE}")
-            conan_install(${_host_profile_flags} ${_build_profile_flags} --build=missing ${generator})
+            conan_install(${_host_profile_flags} ${_build_profile_flags} ${CONAN_INSTALL_ARGS} ${generator})
         else()
             message(STATUS "CMake-Conan: Installing both Debug and Release")
-            conan_install(${_host_profile_flags} ${_build_profile_flags} -s build_type=Release --build=missing ${generator})
-            conan_install(${_host_profile_flags} ${_build_profile_flags} -s build_type=Debug --build=missing ${generator})
+            conan_install(${_host_profile_flags} ${_build_profile_flags} -s build_type=Release ${CONAN_INSTALL_ARGS} ${generator})
+            conan_install(${_host_profile_flags} ${_build_profile_flags} -s build_type=Debug ${CONAN_INSTALL_ARGS} ${generator})
         endif()
         unset(_host_profile_flags)
         unset(_build_profile_flags)
@@ -613,10 +618,11 @@ cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL conan_provide_dependen
 # Configurable variables for Conan profiles
 set(CONAN_HOST_PROFILE "default;auto-cmake" CACHE STRING "Conan host profile")
 set(CONAN_BUILD_PROFILE "default" CACHE STRING "Conan build profile")
+set(CONAN_INSTALL_ARGS "--build=missing" CACHE STRING "Command line arguments for conan install")
 
 find_program(_cmake_program NAMES cmake NO_PACKAGE_ROOT_PATH NO_CMAKE_PATH NO_CMAKE_ENVIRONMENT_PATH NO_CMAKE_SYSTEM_PATH NO_CMAKE_FIND_ROOT_PATH)
-
 if(NOT _cmake_program)
     get_filename_component(PATH_TO_CMAKE_BIN "${CMAKE_COMMAND}" DIRECTORY)
     set(PATH_TO_CMAKE_BIN "${PATH_TO_CMAKE_BIN}" CACHE INTERNAL "Path where the CMake executable is")
 endif()
+
